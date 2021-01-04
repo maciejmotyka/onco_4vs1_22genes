@@ -1,0 +1,158 @@
+---
+title: "Network enrichment with NEArender"
+output:
+  html_notebook:
+    code_folding: show
+editor_options:
+  chunk_output_type: console
+---
+# {.tabset .tabset-fade .tabset-pills}
+
+## Setup
+### Load libraries and resolve conflicts
+```{r}
+library(here)
+library(tidyverse)
+library(tidylog)
+library(org.Hs.eg.db)
+library(conflicted)
+conflict_prefer("filter", "tidylog")
+conflict_prefer("select", "tidylog")
+conflict_prefer("drop_na", "tidylog")
+conflict_prefer("filter_all", "tidylog")
+conflict_prefer("full_join", "tidylog")
+conflict_prefer("mutate", "tidylog")
+conflict_prefer("distinct", "tidylog")
+conflict_prefer("filter_at", "tidylog")
+conflict_prefer("group_by", "tidylog")
+conflict_prefer("rename_at", "tidylog")
+conflict_prefer("count", "tidylog")
+```
+
+## Prepare AGS with Entrez ids
+```{r}
+common_genes <- read_tsv(here("data", "common_genes_4vs1.tsv"), col_names = "gene")
+
+## map the ids and construct the AGS object
+ags_entrez <- 
+  common_genes$gene %>%
+  AnnotationDbi::mapIds(keytype = "SYMBOL",
+                        column = "ENTREZID",
+                        x = org.Hs.eg.db,
+                        multiVals = "first") %>%
+  enframe("symbol", "entrez_id") %>%
+  as.data.frame() %>%
+  NEArender::import.gs(gs.type = "a",
+                       col.gene = 2,
+                       col.set = 0)
+```
+
+## Read the AGS, NET, and 3 FGS objects
+```{r}
+list("net_pc12_entrez",
+     "fgs_kegg_entrez",
+     "fgs_react71_entrez",
+     "fgs_wp_entrez") %>%
+  lapply(function(x)
+    load(paste0("data/", x, ".RData"), .GlobalEnv))
+```
+
+## Perfom NEA
+```{r}
+nea_react <- NEArender::nea.render(AGS = ags_entrez,
+                                   FGS = fgs_react71_entrez,
+                                   NET = net_pc12_entrez,
+                                   Parallelize = 8,
+                                   members = T,
+                                   graph = T)
+
+nea_kegg <- NEArender::nea.render(AGS = ags_entrez,
+                                  FGS = fgs_kegg_entrez,
+                                  NET = net_pc12_entrez,
+                                  Parallelize = 8,
+                                  members = T,
+                                  graph = T)
+
+nea_wp <- NEArender::nea.render(AGS = ags_entrez,
+                                FGS = fgs_wp_entrez,
+                                NET = net_pc12_entrez,
+                                Parallelize = 8,
+                                members = T,
+                                graph = T)
+
+varhandle::save.var(newdirtag = "NEArender_raw_results",
+                    path = here("analysis"),
+                    varlist = c("nea_kegg", "nea_react", "nea_wp"))
+```
+
+## Extract results
+### Define functions
+#### extractNeaResult()
+```{r}
+extractNeaResults <- function(nea_results, threshold = NULL) {
+  members_ags <- nea_results$members.ags %>%
+    t.default() %>%
+    as.data.frame.matrix() %>%
+    rownames_to_column("pathway") %>%
+    rename_at(.vars = vars(-pathway), .funs = ~paste0("ags_", .))
+  
+  members_fgs <- nea_results$members.fgs %>%
+    as.data.frame.matrix() %>%
+    rownames_to_column("pathway") %>%
+    rename_at(vars(-pathway), ~paste0("fgs_", .))
+
+  q_values <- nea_results$q %>%
+    as.data.frame.matrix() %>%
+    rownames_to_column("pathway") %>%
+    rename_at(vars(-pathway), ~paste0("qval_", .))
+  
+  n_missing_qvals <- is.na(q_values) %>% sum()
+  print(paste("Number of missing q values: ", n_missing_qvals))
+  
+  n_expected <- nea_results$n.expected %>%
+    as.data.frame.matrix() %>%
+    rownames_to_column("pathway") %>%
+    rename_at(vars(-pathway), ~paste0("n_expected_", .))
+  
+  n_expected %>%
+    filter(across(starts_with("n_expected_")) == 0) %>%
+    nrow() %>% 
+    paste("Number of pathways with 0 expected links:", .) %>% 
+    print()
+  
+  n_actual <- nea_results$n.actual %>%
+    as.data.frame.matrix() %>%
+    rownames_to_column("pathway") %>%
+    rename_at(vars(-pathway), ~paste0("n_actual_", .))
+  
+  nea_results_clean <- q_values %>%
+    full_join(members_ags, by = "pathway") %>%
+    full_join(members_fgs, by = "pathway") %>%
+    full_join(n_actual, by = "pathway") %>%
+    full_join(n_expected, by = "pathway") %>%
+    separate(pathway, into = c("pathway_id", "pathway_name"), sep = "_", extra = "merge")
+
+  if (!is.null(threshold)) {
+    nea_results_clean %>% 
+      filter(across(starts_with("qval")) < threshold)
+  } else {
+    nea_results_clean
+  }
+}
+```
+
+### Clean the results and extract significant pathways
+#### KEGG
+```{r}
+res_nea_kegg <- nea_kegg %>% extractNeaResults(0.01)
+```
+
+#### Reactome
+```{r}
+res_nea_react <- nea_react %>% extractNeaResults(0.01)
+```
+
+#### WikiPathways
+```{r}
+res_nea_wp <- nea_wp %>% extractNeaResults(0.01)
+```
