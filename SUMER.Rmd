@@ -1,0 +1,67 @@
+---
+title: "Summarize enrichment results with SUMER"
+output:
+  html_notebook:
+    code_folding: show
+editor_options:
+  chunk_output_type: console
+---
+# {.tabset .tabset-fade .tabset-pills}
+
+# SUMER step 0 - prepare input files and configs
+## Setup
+### Load libraries and resolve conflicts
+```{r}
+library(here)
+library(tidyverse)
+library(tidylog)
+library(conflicted)
+conflict_prefer("select", "tidylog")
+conflict_prefer("mutate", "tidylog")
+conflict_prefer("left_join", "tidylog")
+conflict_prefer("rename_all", "tidylog")
+conflict_prefer("mutate_all", "tidylog")
+conflict_prefer("filter", "tidylog")
+```
+
+### Function definitions
+#### Def makeFilesForSumer
+```{r}
+makeFilesForSumer <- function(df_list, outdir) {
+  
+  if (!dir.exists(outdir)) dir.create(outdir)
+  
+  for (name in names(df_list)) {
+    # create a gmt file
+    df_list[[name]] %>% 
+      select(pathway_name, pathway_id, "ags_genes" = starts_with("ags")) %>% 
+      splitstackshape::cSplit("ags_genes", sep = ",") %>% 
+      write_tsv(str_c(outdir, "/", name, ".gmt"), col_names = F, na = "")
+    
+    # create a score file
+    df_list[[name]] %>% 
+      select(pathway_name, fdr = starts_with("qval")) %>% 
+      mutate(fdr = -log10(fdr)) %>% 
+      write_tsv(str_c(outdir, "/", name, "_score.txt"), col_names = F)
+  }
+}
+```
+
+## Analysis
+### Load NEArender results
+```{r}
+dir(here("analysis", "20210104-165325-NEArender_results"),
+    full.names = T) %>% 
+  map(load, .GlobalEnv)
+```
+
+### Prepare input files to Sumer
+#### Create gmt and score files for Sumer
+```{r} 
+Hmisc::llist(res_nea_kegg,
+             res_nea_react,
+             res_nea_wp) %>%
+  makeFilesForSumer(outdir = here("analysis",
+                                  paste0(Sys.time() %>% format("%Y%m%d-%H%M%S"),
+                                         "-SUMER_input")))
+```
