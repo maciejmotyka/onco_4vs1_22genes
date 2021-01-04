@@ -147,4 +147,7 @@ res_nea_kegg <- nea_kegg %>% extractNeaResults(0.01) #41
 res_nea_react <- nea_react %>% extractNeaResults(0.01) #270
 res_nea_wp <- nea_wp %>% extractNeaResults(0.01) #54
 
+varhandle::save.var(newdirtag = "NEArender_results",
+                    path = here("analysis"),
+                    varlist = c("res_nea_kegg", "res_nea_react", "res_nea_wp"))
 ```
