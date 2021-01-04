@@ -142,17 +142,9 @@ extractNeaResults <- function(nea_results, threshold = NULL) {
 ```
 
 ### Clean the results and extract significant pathways
-#### KEGG
 ```{r}
-res_nea_kegg <- nea_kegg %>% extractNeaResults(0.01)
-```
+res_nea_kegg <- nea_kegg %>% extractNeaResults(0.01) #41
+res_nea_react <- nea_react %>% extractNeaResults(0.01) #270
+res_nea_wp <- nea_wp %>% extractNeaResults(0.01) #54
 
-#### Reactome
-```{r}
-res_nea_react <- nea_react %>% extractNeaResults(0.01)
-```
-
-#### WikiPathways
-```{r}
-res_nea_wp <- nea_wp %>% extractNeaResults(0.01)
 ```
